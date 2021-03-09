@@ -1,3 +1,4 @@
+Coffeescript = require 'coffeescript'
 
 class Message
   constructor: ( @gateway, @source, @contents) ->
@@ -64,33 +65,45 @@ class Interaction
   nextQuestion: =>
     questionIndex = @currentQuestionIndex()
 
+
     loop #basically do...while
       questionIndex += 1
       question = @questionSet.getQuestion(questionIndex)
-      break unless question? and @shouldSkip(question)
+      break unless question? and await @shouldSkip(question)
 
+    textToSend = ""
     if question?
+      textToSend = if question.calculated_label
+        await @eval("\"#{question.calculated_label}\"") # Allows for dynamic changes to the question
+      else
+        question.label
+
       @data.messagesSent.push
         questionIndex: question.index
-        text: question.label
+        text: textToSend
     else
       @data.complete = true
     @save()
-    question
+    textToSend
 
   shouldSkip: (question) =>
-    # Do stuff here to setup context for eval (ResultOfQuestion, etc)
-    # Might need to reformat skip_logic
-    # If this returns true then question should be skipped
     if question.skip_logic
-      Coffeescript.eval(question.skip_logic) 
+      await @eval(question.skip_logic)
 
   validate: (question, contents) =>
-    # Do stuff here to setup context for eval (ResultOfQuestion, etc)
-    # Might need to reformat skip_logic
-    # If this returns true then question should be skipped
     if question.validate
-      Coffeescript.eval(question.validate(contents))
+      await @eval(question.validate, contents)
+
+  eval: (codeToEval, value) =>
+    codeToEval = """
+(value) ->
+  ResultOfQuestion = (question) ->
+    #{JSON.stringify @resultsByLabel()}?[question]
+
+  #{codeToEval}
+    """
+
+    await ((Coffeescript.eval(codeToEval, {bare:true}))(value))
 
   save: =>
     Gooseberry.interactionTables[@data.gateway].put(@)
@@ -112,16 +125,16 @@ class Interaction
       }
     }
 
-    @nextQuestion()?.label
+    @nextQuestion()
 
   validateAndGetResponse: (messageContents) =>
     currentQuestion = @questionSet.getQuestion(@currentQuestionIndex())
     messageReceived = 
       questionIndex: currentQuestion.index
       text: messageContents
-    validationError = @validate(currentQuestion, messageContents)
+    validationError = await @validate(currentQuestion, messageContents)
     if validationError
-      messageReceived.valid = false
+      messageReceived.invalid = true
       @data.messagesReceived.push messageReceived
       @data.messagesSent.push
         questionIndex: currentQuestion.index
@@ -132,18 +145,27 @@ class Interaction
       return validationError
     else 
       @data.messagesReceived.push messageReceived
-      @nextQuestion()?.label
+      @nextQuestion()
 
-  summaryString: =>
+  summaryString: (debug = false) =>
+    console.log @data if debug
     result = "#{@data.gateway} - #{@questionSet.label()} - #{@data.source} - #{if @data.complete then "complete" else "incomplete"}\n"
-    for sent in @data.messagesSent
+    for question, index in @questionSet.data.questions
 
       relevantReceivedMessage = @data.messagesReceived.find (messageReceived) =>
-        messageReceived.questionIndex is sent.questionIndex and not messageReceived.invalid
+        messageReceived.questionIndex is index and not messageReceived.invalid
 
-      result += "#{sent.text}: #{relevantReceivedMessage.text}\n"
+      result += "#{question.label}: #{relevantReceivedMessage?.text or null}\n"
     result
 
+  resultsByLabel: =>
+    result = {}
+    for messageReceived in @data.messagesReceived
+      unless messageReceived.valid is false
+        questionLabel = @questionSet.data.questions[messageReceived.questionIndex]?.label
+        if questionLabel
+          result[questionLabel] = messageReceived.text
+    result
 
 class QuestionSetTable
   constructor: (@databaseTable) ->
@@ -155,9 +177,9 @@ class QuestionSet
 
   label: => @data.label
 
+  # Also returns the index
   getQuestion: (index) =>
     if @data.questions[index]?
       {...@data.questions[index], index: index}
-
 
 module.exports = {Message, DatabaseTable, InteractionTable, Interaction, QuestionSetTable, QuestionSet}

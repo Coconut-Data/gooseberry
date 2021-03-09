@@ -20,8 +20,15 @@ fixtures = (=>
         type: "text"
       }
       {
+        label: "Middle Name"
+        calculated_label: "\#{ResultOfQuestion('First Name')}, What is your middle name?"
+        skip_logic: "ResultOfQuestion('First Name') is 'Pete'"
+        type: "text"
+      }
+      {
         label: "Last Name"
         type: "text"
+        validate: "'Your name is too long' if value.length > 10" 
       }
     ]
 
@@ -86,35 +93,53 @@ for gateway, gatewayData of (configuration.get "gateways")
   )
 
 #### TESTS ####
+#
+(test = =>
 
-phoneNumber = "+13103905996"
-gateway = "Malawi:SMS"
+  phoneNumber = "+13103905996"
+  gateway = "Malawi:SMS"
 
-send = (message) =>
-  message = new Message(gateway, phoneNumber, message)
-  message.processMessageAndGetResponse()
+  send = (message) =>
+    message = new Message(gateway, phoneNumber, message)
+    message.processMessageAndGetResponse()
 
-dumpDB = =>
-  console.log JSON.stringify(Gooseberry.interactionTables["Malawi:SMS"].databaseTable.data, null, 2)
-
-
-response = send "START Names"
-Assert.equal response, "First Name"
-Assert Object.keys(Gooseberry.interactionTables["Malawi:SMS"].databaseTable.data).length > 1
+  dumpDB = =>
+    console.log JSON.stringify(Gooseberry.interactionTables["Malawi:SMS"].databaseTable.data, null, 2)
 
 
-response = send "Mike"
-Assert.equal response, "Last Name"
+  Assert.responseIs = (text, expectedResponse) =>
+    console.log "-->#{text}"
+    response = await send(text)
+    console.log "<-- #{response}"
+    Assert.equal response, expectedResponse
 
-response = send "McKay"
-Assert response is undefined
-#dumpDB()
+  Assert.responsesAre = (textAndResponses) =>
+    for text, expectedResponse of textAndResponses
+      await Assert.responseIs text, expectedResponse
 
-response = send "START Names"
-response = send "Mike"
-response = send "VdoMcK"
+  await Assert.responseIs "Start Names", "First Name"
 
-#dumpDB()
+  Assert Object.keys(Gooseberry.interactionTables["Malawi:SMS"].databaseTable.data).length > 1
 
-console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
+  await Assert.responsesAre
+    "Mike":"Mike, What is your middle name?"
+    "Vonderohe": "Last Name"
+    "McKay": ""
+  console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
+
+  await setTimeout =>
+    new Promise (resolve) =>
+      resolve()
+  , 100
+
+  await Assert.responsesAre
+    "Start Names":"First Name"
+    "Pete":"Last Name"
+    "RepeatPeteRepeat": "Your name is too long"
+    "RepeatPete": ""
+
+  #dumpDB()
+
+  console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
+)()
 
