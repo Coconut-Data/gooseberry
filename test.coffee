@@ -1,11 +1,4 @@
-Classes = require './index'
-
-Message = Classes.Message
-DatabaseTable = Classes.DatabaseTable
-InteractionTable = Classes.InteractionTable
-Interaction = Classes.Interaction
-QuestionSetTable = Classes.QuestionSetTable
-QuestionSet = Classes.QuestionSet
+`const {Message,DatabaseTable,InteractionTable, Interaction, QuestionSetTable, QuestionSet} = require('./gooseberry')`
 
 Assert = require 'assert'
 
@@ -108,7 +101,7 @@ for gateway, gatewayData of (configuration.get "gateways")
 
 
   Assert.responseIs = (text, expectedResponse) =>
-    console.log "-->#{text}"
+    console.log "--> #{text}"
     response = await send(text)
     console.log "<-- #{response}"
     Assert.equal response, expectedResponse
@@ -138,8 +131,8 @@ for gateway, gatewayData of (configuration.get "gateways")
     "RepeatPeteRepeat": "Your name is too long"
     "RepeatPete": ""
 
-  #dumpDB()
+  dumpDB()
 
-  console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
+  #console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
 )()
 
