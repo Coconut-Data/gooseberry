@@ -1,129 +1,110 @@
-`const {Message,DatabaseTable,InteractionTable, Interaction, QuestionSetTable, QuestionSet} = require('./gooseberry')`
+`const {InteractionTable, Interaction, QuestionSet} = require('./gooseberry')`
+`const {DynamoDBClient} = require("@aws-sdk/client-dynamodb")`
 
 Assert = require 'assert'
 
 fixtures = (=> 
-  source = "+254716925547"
-  startTime = 1614939527318
-  questionSet =
-    label: "Names"
-    questions: [
-      {
-        label: "First Name"
-        type: "text"
-      }
-      {
-        label: "Middle Name"
-        calculated_label: "\#{ResultOfQuestion('First Name')}, What is your middle name?"
-        skip_logic: "ResultOfQuestion('First Name') is 'Pete'"
-        type: "text"
-      }
-      {
-        label: "Last Name"
-        type: "text"
-        validate: "'Your name is too long' if value.length > 10" 
-      }
-    ]
-
-  return {
-
+  {
     "Configuration":
-      gateways:
-        "Malawi:SMS":
-          username: "admin"
-          password: "password"
-          phoneNumber: "424242"
+      gatewayName: "Web"
+      username: "admin"
+      password: "password"
+      phoneNumber: "424242"
 
-    "Malawi:SMS":
-      "#{source}, #{startTime}": 
-        startTime: " 10:10:00"
-        source: "+254716925547"
-        questionSet: questionSet
-        messagesReceived: [
-          {
-            questionIndex: null
-            text: "START"
-          }
-        ]
-        messagesSent: [
-          {
-            questionIndex: 0
-            text: "First Name"
-          }
-        ]
-        complete: false
-
-    "Question Sets":
-      "Names": questionSet
+      "Question Sets":
+        "Names": 
+          label: "Names"
+          version: "1"
+          questions: [
+            {
+              label: "First Name"
+              type: "text"
+            }
+            {
+              label: "Middle Name"
+              calculated_label: "\#{ResultOfQuestion('First Name')}, What is your middle name?"
+              skip_logic: "ResultOfQuestion('First Name') is 'Pete'"
+              type: "text"
+            }
+            {
+              label: "Last Name"
+              type: "text"
+              validation: "'Your name is too long' if value.length > 10" 
+            }
+          ]
+        "Radio": 
+          label: "Radio"
+          version: "1"
+          "complete_message": "Thanks, I hope you go to \#{ResultOfQuestion('Favorite Country')} and not \#{ResultOfQuestion('Least Favorite Place')}"
+          questions: [
+            {
+              label: "Favorite Country?"
+              type: "radio"
+              "radio-options": "USA, Kenya, Austria, UK"
+            }
+            {
+              label: "Least Favorite Place?"
+              calculated_label: "What is your least favorite place? Dayton or Winnemucca?"
+              type: "radio"
+              "radio-options": "Dayton, Winnemucca"
+            }
+          ]
+        "Number": 
+          label: "Number"
+          version: "1"
+          questions: [
+            {
+              label: "What is the best number?"
+              type: "number"
+            }
+          ]
   }
 )()
 
 
-questionSets = new QuestionSetTable(
-  new DatabaseTable(
-    fixtures["Question Sets"]
-  )
-)
+class Gooseberry
+  constructor: (gatewayConfiguration) ->
+    @gateway = gatewayConfiguration
+    @dynamoDBClient = new DynamoDBClient() # Probably will already have this to have gotten configuration
+    @interactionTable = new InteractionTable(@gateway.gatewayName, @dynamoDBClient)
 
-configuration = new DatabaseTable(
-  fixtures["Configuration"]
-)
+  getQuestionSetData: (questionSetName) =>
+    questionSetsByUpperCaseName = {}
+    for name, data of @gateway["Question Sets"]
+      questionSetsByUpperCaseName[name.toUpperCase()] = data
+    questionSetsByUpperCaseName[questionSetName.toUpperCase()]
 
-global.Gooseberry =
-  interactionTables: {}
-  questionSets: new QuestionSetTable(
-    new DatabaseTable(
-      fixtures["Question Sets"]
-    )
-  )
+  getResponse: (phoneNumber, message) =>
+    interaction = await Interaction.startNewOrFindIncomplete(phoneNumber, message)
+    interaction.validateAndGetResponse()
 
 
-for gateway, gatewayData of (configuration.get "gateways")
-  Gooseberry.interactionTables[gateway] = new InteractionTable(
-    new DatabaseTable(
-      fixtures[gateway]
-    )
-  )
-
-#### TESTS ####
-#
-(test = =>
-
-  phoneNumber = "+13103905996"
-  gateway = "Malawi:SMS"
-
-  send = (message) =>
-    message = new Message(gateway, phoneNumber, message)
-    message.processMessageAndGetResponse()
-
-  dumpDB = =>
-    console.log JSON.stringify(Gooseberry.interactionTables["Malawi:SMS"].databaseTable.data, null, 2)
+global.gooseberry = new Gooseberry(fixtures["Configuration"])
 
 
-  Assert.responseIs = (text, expectedResponse) =>
-    console.log "--> #{text}"
-    response = await send(text)
-    console.log "<-- #{response}"
-    Assert.equal response, expectedResponse
+phoneNumber = "+13103905996"
 
-  Assert.responsesAre = (textAndResponses) =>
-    for text, expectedResponse of textAndResponses
-      await Assert.responseIs text, expectedResponse
+summaryString = =>
+  (await gooseberry.interactionTable.getLatestInteractionForSource(phoneNumber)).summaryString()
 
+Assert.responseIs = (text, expectedResponse) =>
+  console.log "--> #{text}"
+  response = await gooseberry.getResponse(phoneNumber,text)
+  console.log "<-- #{response}"
+  Assert.equal response, expectedResponse
+
+Assert.responsesAre = (textAndResponses) =>
+  for text, expectedResponse of textAndResponses
+    await Assert.responseIs text, expectedResponse
+
+
+oldTests = =>
   await Assert.responseIs "Start Names", "First Name"
-
-  Assert Object.keys(Gooseberry.interactionTables["Malawi:SMS"].databaseTable.data).length > 1
 
   await Assert.responsesAre
     "Mike":"Mike, What is your middle name?"
     "Vonderohe": "Last Name"
     "McKay": ""
-  console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
-
-  await setTimeout =>
-    new Promise (resolve) =>
-      resolve()
-  , 100
 
   await Assert.responsesAre
     "Start Names":"First Name"
@@ -131,8 +112,39 @@ for gateway, gatewayData of (configuration.get "gateways")
     "RepeatPeteRepeat": "Your name is too long"
     "RepeatPete": ""
 
-  dumpDB()
+  await Assert.responsesAre
+    "Start Nonexistent":"Sorry, there is no question set named 'Nonexistent'"
 
-  #console.log Gooseberry.interactionTables["Malawi:SMS"].getLatestInteractionForSource(phoneNumber).summaryString()
-)()
+  await Assert.responsesAre
+    "Start Names":"First Name"
+    "Mike":"Mike, What is your middle name?"
+    "Vonderohe": "Last Name"
+    "McKay": ""
+    "Poopy Pants":"No open question set for #{phoneNumber}. 'Names' is complete. You can restart it with 'Start Names'."
+
+    interaction = await Interaction.startNewOrFindIncomplete("6969", "Send me money")
+    result = await interaction.validateAndGetResponse()
+    Assert.equal result, "No open question set for 6969, no action for 'Send me money'. Try: 'Start Test Questions'."
+
+radioTests = =>
+  await Assert.responsesAre
+    "Start Radio":"Favorite Country? [USA, Kenya, Austria, UK]"
+    "Germany":"Value must be USA or Kenya or Austria or UK, you sent 'Germany'"
+    "Austria":"What is your least favorite place? Dayton or Winnemucca?"
+    "Dayton": "Thanks, I hope you go to Austria and not Dayton"
+
+numberTests = =>
+  await Assert.responsesAre
+    "Start Number":"What is the best number?"
+    "Dunno":"Value must be a number, you sent 'Dunno'"
+
+
+
+allTests = =>
+  await oldTests()
+  await radioTests()
+
+#allTests()
+#radioTests()
+numberTests()
 

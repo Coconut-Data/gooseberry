@@ -1,6 +1,10 @@
 Coffeescript = require 'coffeescript'
 `const {DynamoDBClient,GetItemCommand,PutItemCommand,QueryCommand} = require("@aws-sdk/client-dynamodb")`
-`const { marshall, unmarshall } = require("@aws-sdk/util-dynamodb")`
+
+`const format = require("date-fns/format")`
+`const differenceInMinutes = require('date-fns/differenceInMinutes')`
+
+`const {marshall, unmarshall} = require("@aws-sdk/util-dynamodb")`
 
 class QuestionSet
   constructor: (@data) ->
@@ -70,7 +74,11 @@ class Interaction
     textToSend = ""
     if question?
       textToSend = if question.calculated_label
-        await @eval("\"#{question.calculated_label}\"") # Allows for dynamic changes to the question
+        await @evalForInterpolatedValues(question.calculated_label) # Allows for dynamic changes to the question
+      else if question.type is "radio"
+        "#{question.label} [#{question["radio-options"]}]"
+      else if question.type is "audio"
+        question.url
       else
         question.label
 
@@ -79,16 +87,66 @@ class Interaction
         text: textToSend
     else
       @data.complete = true
+      if @questionSet.data.complete_message?
+        textToSend = await @evalForInterpolatedValues(@questionSet.data.complete_message)
+        @data.messagesSent.push
+          questionIndex: questionIndex
+          text: textToSend
+
+    @updateReportingData()
     await @save()
     textToSend
+
+  updateReportingData: =>
+    @data.reporting = {
+      source: @data.source
+      questionSetName: @data.questionSet.label
+      complete: @data.complete or false
+      timeStarted: format(@data.startTime, "yyyy-MM-dd HH:mm:ss")
+    }
+
+    if @data.complete is true
+      completedTimestamp = @data.messagesReceived?[@data.messagesReceived.length-1]?.timestamp
+      @data.reporting.timeCompleted = format(completedTimestamp, "yyyy-MM-dd HH:mm:ss")
+      @data.reporting.minutesToComplete = differenceInMinutes(completedTimestamp,@data.startTime)
+    else
+      @data.reporting.minutesSinceStart = differenceInMinutes(Date.now(),@data.startTime)
+
+    for question, index in @questionSet.data.questions
+      relevantReceivedMessage = @data.messagesReceived.find (messageReceived) =>
+        messageReceived.questionIndex is index and not messageReceived.invalid
+      @data.reporting[question.label] = relevantReceivedMessage?.text or "-"
+
 
   shouldSkip: (question) =>
     if question.skip_logic
       await @eval(question.skip_logic)
 
+  # null result means that validation was passed
   validate: (question, contents) =>
-    if question.validate
-      await @eval(question.validate, contents)
+    validationErrorMessage = if question.validation
+      await @eval(question.validation, contents)
+
+    radioErrorMessage = if question.type is "radio"
+      options = question["radio-options"].split(/, */)
+      if options.includes(contents)
+        null
+      else
+        "Value must be #{options.join(" or ")}, you sent '#{contents}'"
+
+    numberErrorMessage = if question.type is "number"
+      if isNaN(contents)
+        "Value must be a number, you sent '#{contents}'"
+      else
+        null
+
+    if validationErrorMessage isnt null or radioErrorMessage isnt null or numberErrorMessage isnt null
+      "#{validationErrorMessage or ""}#{radioErrorMessage or ""}#{numberErrorMessage or ""}"
+    else
+      null
+
+  evalForInterpolatedValues: (codeToEval, value) =>
+    @eval("\"#{codeToEval}\"", value)
 
   eval: (codeToEval, value) =>
     codeToEval = """
@@ -102,6 +160,7 @@ class Interaction
     await ((Coffeescript.eval(codeToEval, {bare:true}))(value))
 
   save: =>
+    @data.lastUpdate = Date.now()
     gooseberry.interactionTable.put(@)
 
   validateAndGetResponse: =>
@@ -111,6 +170,7 @@ class Interaction
     messageReceived = 
       questionIndex: currentQuestionIndex
       text: @latestMessageContents
+      timestamp: Date.now()
     validationError = await @validate(currentQuestion, @latestMessageContents)
     if validationError
       messageReceived.invalid = true
@@ -127,8 +187,7 @@ class Interaction
       @nextQuestion()
 
   summaryString: (debug = false) =>
-    console.log @data if debug
-    result = "#{@data.gateway} - #{@questionSet.label()} - #{@data.source} - #{if @data.complete then "complete" else "incomplete"}\n"
+    result = "#{@data.gateway} - #{@questionSet.label()} - #{@data.source} - #{if @data.complete then "complete" else "incomplete"} - #{@data.startTime}\n"
     for question, index in @questionSet.data.questions
 
       relevantReceivedMessage = @data.messagesReceived.find (messageReceived) =>
@@ -144,6 +203,7 @@ class Interaction
         questionLabel = @questionSet.data.questions[messageReceived.questionIndex]?.label
         if questionLabel
           result[questionLabel] = messageReceived.text
+          result[questionLabel.replace(/[^a-zA-Z0-9 ]+/g,"")] = messageReceived.text # Remove non alphanumeric things like punctuation but keep spaces
     result
 
 Interaction.startNewOrFindIncomplete = (source, contents) ->
@@ -151,7 +211,7 @@ Interaction.startNewOrFindIncomplete = (source, contents) ->
   if startMatch = contents.match(/^ *START +(.*)/i)
     questionSetName = startMatch[1]
 
-    questionSetData = gooseberry.gateway["Question Sets"]?[questionSetName]
+    questionSetData = gooseberry.getQuestionSetData(questionSetName)
     unless questionSetData
       return new Interaction(
         error: "Sorry, there is no question set named '#{questionSetName}'"
@@ -161,6 +221,7 @@ Interaction.startNewOrFindIncomplete = (source, contents) ->
       startTime: Date.now()
       gateway: gooseberry.gateway.gatewayName
       questionSet: questionSetData
+      questionSetName: questionSetData.label
       messagesReceived: []
       messagesSent: []
     )
