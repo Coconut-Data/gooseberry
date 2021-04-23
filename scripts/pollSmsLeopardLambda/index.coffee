@@ -50,7 +50,7 @@ sendToGooseberry = (options) =>
 
 exports.handler = (event) =>    
   messages = await getAllUnreadMessagesInLastFiveMinutes()
-  console.log "Found #{messages.length} messages."
+  process.stdout.write "#{messages.length or "."}"
   for message in messages
     # Don't await this, let it send a bunch of parallel requests so Lambda can scale it, also saves time that would just be waiting for a http response
     sendToGooseberry
@@ -59,4 +59,3 @@ exports.handler = (event) =>
       gateway: "Tusome"
       canSendResponses: false
     updateReadStatus(message.id, true)
-  console.log "Done"

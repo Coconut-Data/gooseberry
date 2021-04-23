@@ -5,6 +5,7 @@ Coffeescript = require 'coffeescript'
 `const differenceInMinutes = require('date-fns/differenceInMinutes')`
 
 `const {marshall, unmarshall} = require("@aws-sdk/util-dynamodb")`
+`const Fuse = require('fuse.js')`
 
 class QuestionSet
   constructor: (@data) ->
@@ -127,12 +128,37 @@ class Interaction
     validationErrorMessage = if question.validation
       await @eval(question.validation, contents)
 
+    # With radio options we convert any incoming messages to the format of the radio option even if it's a different case
     radioErrorMessage = if question.type is "radio"
       options = question["radio-options"].split(/, */)
-      if options.includes(contents)
-        null
+      optionsUpperCaseMappedToOriginal = {}
+      options.forEach (option) => 
+        upperCaseOption = option.toUpperCase()
+        optionsUpperCaseMappedToOriginal[upperCaseOption] = option
+        # Handle special case of people sending "y" or "n" for a Yes/No queston
+        if upperCaseOption is "YES" and contents.toUpperCase() is "Y" then contents = "Yes"
+        if upperCaseOption is "NO" and contents.toUpperCase() is "N" then contents = "No"
+      upperCaseOptions = Object.keys(optionsUpperCaseMappedToOriginal)
+      if upperCaseOptions.includes(contents.toUpperCase())
+        @latestMessageContents = optionsUpperCaseMappedToOriginal[contents.toUpperCase()] #Update the incoming message text
+        null # null means validation passed
       else
-        "Value must be #{options.join(" or ")}, you sent '#{contents}'"
+
+        updatedWithFuse = if question.type is "radio" and question.disable_fuzzy_search isnt true
+          fuse = new Fuse(question["radio-options"].split(/, */), 
+            includeScore:true
+            threshold: 0.4
+          )
+          if fuse.search(contents)?[0]?.item
+            @latestMessageContents = fuse.search(contents)?[0]?.item
+
+
+        if updatedWithFuse
+          null # Validated after a fuzzy match
+        else if options.join(",").length > 100
+          "Value must be #{options.join(",")[0..100]} ...[not all shown], you sent '#{contents}'"
+        else
+          "Value must be #{options.join(" or ")}, you sent '#{contents}'"
 
     numberErrorMessage = if question.type is "number"
       if isNaN(contents)
@@ -167,11 +193,12 @@ class Interaction
     return @data.error if @data.error?
     currentQuestionIndex = @currentQuestionIndex()
     currentQuestion = @questionSet.getQuestion(currentQuestionIndex)
+    # Validate before creating messageReceived so we can update latestMessageContents in some cases
+    validationError = await @validate(currentQuestion, @latestMessageContents)
     messageReceived = 
       questionIndex: currentQuestionIndex
       text: @latestMessageContents
       timestamp: Date.now()
-    validationError = await @validate(currentQuestion, @latestMessageContents)
     if validationError
       messageReceived.invalid = true
       @data.messagesReceived.push messageReceived
@@ -208,6 +235,7 @@ class Interaction
 
 Interaction.startNewOrFindIncomplete = (source, contents) ->
   # If it's a start message, then setup for a new interaction, otherwise look up from DB
+  contents = contents.trim() # Handle extra whitespace
   if startMatch = contents.match(/^ *START +(.*)/i)
     questionSetName = startMatch[1]
 

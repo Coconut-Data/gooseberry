@@ -129,11 +129,9 @@ exports.handler = (event) =>
         'Content-Type':"text/html"
       body: response
     else
-      console.log "Sending using configuration function"
       configSendResponse = await eval(configuration.send)
         to: source
         message: response
-      console.log configSendResponse
 
       statusCode: 200
       headers: 

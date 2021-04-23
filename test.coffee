@@ -48,6 +48,11 @@ fixtures = (=>
               type: "radio"
               "radio-options": "Dayton, Winnemucca"
             }
+            {
+              label: "Do you like trying new food?"
+              type: "radio"
+              "radio-options": "Yes, No"
+            }
           ]
         "Number": 
           label: "Number"
@@ -58,6 +63,19 @@ fixtures = (=>
               type: "number"
             }
           ]
+        "NoFuzz": 
+          label: "Radio"
+          version: "1"
+          questions: [
+            {
+              label: "Favorite Country?"
+              type: "radio"
+              disable_fuzzy_search: true
+              "radio-options": "USA, Kenya, Austria, UK"
+            }
+          ]
+
+
   }
 )()
 
@@ -94,57 +112,109 @@ Assert.responseIs = (text, expectedResponse) =>
   Assert.equal response, expectedResponse
 
 Assert.responsesAre = (textAndResponses) =>
-  for text, expectedResponse of textAndResponses
+  while textAndResponses.length > 0
+    text = textAndResponses.shift()
+    expectedResponse = textAndResponses.shift()
     await Assert.responseIs text, expectedResponse
 
-
-oldTests = =>
+global.oldTests = =>
   await Assert.responseIs "Start Names", "First Name"
 
-  await Assert.responsesAre
-    "Mike":"Mike, What is your middle name?"
-    "Vonderohe": "Last Name"
-    "McKay": ""
+  await Assert.responsesAre [
+    "Start Names"
+    "First Name"
+    "Mike",
+    "Mike, What is your middle name?"
+    "Vonderohe"
+    "Last Name"
+    "McKay"
+    ""
+  ]
 
-  await Assert.responsesAre
-    "Start Names":"First Name"
-    "Pete":"Last Name"
-    "RepeatPeteRepeat": "Your name is too long"
-    "RepeatPete": ""
+  await Assert.responsesAre [
+    "Start Names"
+    "First Name"
+    "Pete"
+    "Last Name"
+    "RepeatPeteRepeat"
+    "Your name is too long"
+    "RepeatPete"
+    ""
+  ]
 
-  await Assert.responsesAre
-    "Start Nonexistent":"Sorry, there is no question set named 'Nonexistent'"
+  await Assert.responsesAre [
+    "Start Nonexistent"
+    "Sorry, there is no question set named 'Nonexistent'"
+  ]
 
-  await Assert.responsesAre
-    "Start Names":"First Name"
-    "Mike":"Mike, What is your middle name?"
-    "Vonderohe": "Last Name"
-    "McKay": ""
-    "Poopy Pants":"No open question set for #{phoneNumber}. 'Names' is complete. You can restart it with 'Start Names'."
+  await Assert.responsesAre [
+    "Start Names"
+    "First Name"
+    "Mike"
+    "Mike, What is your middle name?"
+    "Vonderohe"
+    "Last Name"
+    "McKay"
+    ""
+    "Poopy Pants"
+    "No open question set for #{phoneNumber}. 'Names' is complete. You can restart it with 'Start Names'."
+  ]
 
-    interaction = await Interaction.startNewOrFindIncomplete("6969", "Send me money")
-    result = await interaction.validateAndGetResponse()
-    Assert.equal result, "No open question set for 6969, no action for 'Send me money'. Try: 'Start Test Questions'."
+  interaction = await Interaction.startNewOrFindIncomplete("6969", "Send me money")
+  result = await interaction.validateAndGetResponse()
+  Assert.equal result, "No open question set for 6969, no action for 'Send me money'. Try: 'Start Test Questions'."
 
-radioTests = =>
-  await Assert.responsesAre
-    "Start Radio":"Favorite Country? [USA, Kenya, Austria, UK]"
-    "Germany":"Value must be USA or Kenya or Austria or UK, you sent 'Germany'"
-    "Austria":"What is your least favorite place? Dayton or Winnemucca?"
-    "Dayton": "Thanks, I hope you go to Austria and not Dayton"
+global.radioTests = =>
+  await Assert.responsesAre [
+    "Start Radio"
+    "Favorite Country? [USA, Kenya, Austria, UK]"
+    "Germany"
+    "Value must be USA or Kenya or Austria or UK, you sent 'Germany'"
+    "austria "
+    "What is your least favorite place? Dayton or Winnemucca?"
+    "Dayton"
+    "Do you like trying new food? [Yes, No]"
+    "y"
+    "Thanks, I hope you go to Austria and not Dayton"
+  ]
 
-numberTests = =>
-  await Assert.responsesAre
-    "Start Number":"What is the best number?"
-    "Dunno":"Value must be a number, you sent 'Dunno'"
+  await Assert.responsesAre [
+    "Start Radio"
+    "Favorite Country? [USA, Kenya, Austria, UK]"
+    "Kanye"
+    "What is your least favorite place? Dayton or Winnemucca?"
+    "Reno"
+    "Value must be Dayton or Winnemucca, you sent 'Reno'"
+    "Winnemucca"
+    "Do you like trying new food? [Yes, No]"
+    "y"
+    "Thanks, I hope you go to Kenya and not Winnemucca"
+  ]
+
+  await Assert.responsesAre [
+    "Start NoFuzz"
+    "Favorite Country? [USA, Kenya, Austria, UK]"
+    "Kenye"
+    "Value must be USA or Kenya or Austria or UK, you sent 'Kenye'"
+  ]
 
 
+global.numberTests = =>
+  await Assert.responsesAre [
+    "Start Number"
+    "What is the best number?"
+    "Dunno"
+    "Value must be a number, you sent 'Dunno'"
+    "1"
+    ""
+  ]
 
-allTests = =>
-  await oldTests()
-  await radioTests()
-
-#allTests()
-#radioTests()
-numberTests()
+( =>
+  if process.argv[2] isnt "--all"
+    await global[process.argv[2].replace(/--/,"")]()
+  else
+    await oldTests()
+    await radioTests()
+    await numberTests()
+)()
 
