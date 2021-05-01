@@ -61,6 +61,14 @@ exports.handler = (event) =>
           [message,from, to] 
         else
           [parsedBody.Body,from, to]
+      else if event.isBase64Encoded #SMSLeopard
+        parsedBody = qs.parse(Buffer.from(event.body,"base64").toString("utf8"))
+        console.log "Parsed Body:"
+        parsedBody = JSON.parse(Object.keys(parsedBody)[0])
+        console.log parsedBody
+        canSendResponses = false
+        [parsedBody.message, "+"+parsedBody.sender, "Tusome"]
+
   else 
     [event.queryStringParameters?.message, event.queryStringParameters?.from, event.queryStringParameters?.gateway]
 

@@ -187,7 +187,7 @@ global.radioTests = =>
     "Value must be Dayton or Winnemucca, you sent 'Reno'"
     "Winnemucca"
     "Do you like trying new food? [Yes, No]"
-    "y"
+    "yes"
     "Thanks, I hope you go to Kenya and not Winnemucca"
   ]
 
@@ -210,7 +210,7 @@ global.numberTests = =>
   ]
 
 ( =>
-  if process.argv[2] isnt "--all"
+  if process.argv?[2]? and process.argv[2] isnt "--all"
     await global[process.argv[2].replace(/--/,"")]()
   else
     await oldTests()

@@ -1,5 +1,6 @@
 axios = require('axios')
 sub = require('date-fns/sub')
+fs = require('fs');
 
 getHeaders = =>
   'Connection': 'keep-alive',
@@ -38,24 +39,34 @@ updateReadStatus = (messageId, readStatus) =>
   .catch (error) =>
     console.log(error)
 
-sendToGooseberry = (options) => 
-  axios(
+sendToGooseberryAndMarkAsRead = (options) => 
+  axios
     method: 'post'
     url: "https://f9l1259lmb.execute-api.us-east-1.amazonaws.com/gooseberry"
     data: options
-  )
+  .then (result) =>
+    updateReadStatus(options.messageId, true)
+    fs.appendFileSync('./loggy.log', JSON.stringify(result))
   .catch (error) =>
+    # Don't mark as read so that this can be retried
     console.error error
-
+    fs.appendFileSync('./loggy.log', "ERROR: #{JSON.stringify error}\n")
 
 exports.handler = (event) =>    
   messages = await getAllUnreadMessagesInLastFiveMinutes()
-  process.stdout.write "#{messages.length or "."}"
+
+  process.stdout.write if messages.length > 0
+    messages.length + " "
+  else
+    "."
+
   for message in messages
-    # Don't await this, let it send a bunch of parallel requests so Lambda can scale it, also saves time that would just be waiting for a http response
-    sendToGooseberry
+    # Don't await this, let it send a bunch of parallel requests so Lambda can scale it
+    fs.appendFileSync('./loggy.log', "<- #{message.sender}: #{message.message}\n")
+    sendToGooseberryAndMarkAsRead
       from: "+#{message.sender}"
       message: message.message
       gateway: "Tusome"
       canSendResponses: false
-    updateReadStatus(message.id, true)
+      messageId: message.messageId
+

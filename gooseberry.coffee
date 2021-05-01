@@ -143,14 +143,16 @@ class Interaction
         @latestMessageContents = optionsUpperCaseMappedToOriginal[contents.toUpperCase()] #Update the incoming message text
         null # null means validation passed
       else
-
-        updatedWithFuse = if question.type is "radio" and question.disable_fuzzy_search isnt true
-          fuse = new Fuse(question["radio-options"].split(/, */), 
-            includeScore:true
-            threshold: 0.4
-          )
-          if fuse.search(contents)?[0]?.item
-            @latestMessageContents = fuse.search(contents)?[0]?.item
+        # Commented out because errors on AWS about Fuse not being a constructor
+        #updatedWithFuse = if question.type is "radio" and question.disable_fuzzy_search isnt true
+        #  console.log "Loading fuse"
+        #  fuse = new Fuse(question["radio-options"].split(/, */), 
+        #    includeScore:true
+        #    threshold: 0.4
+        #  )
+        #  if fuse.search(contents)?[0]?.item
+        #    @latestMessageContents = fuse.search(contents)?[0]?.item
+        updatedWithFuse = false
 
 
         if updatedWithFuse
