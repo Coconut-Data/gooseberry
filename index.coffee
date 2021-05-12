@@ -1,6 +1,7 @@
 `const {InteractionTable, Interaction, QuestionSet} = require('./gooseberry')`
 `const {DynamoDBClient,GetItemCommand, CreateTableCommand} = require("@aws-sdk/client-dynamodb")`
 `const {marshall, unmarshall} = require("@aws-sdk/util-dynamodb")`
+axios = require 'axios'
 qs = require 'qs'
 
 class Gooseberry
@@ -60,7 +61,31 @@ exports.handler = (event) =>
             "START IVR" #TODO figure out a way to choose any question set, using voice recognition etc
           [message,from, to] 
         else
-          [parsedBody.Body,from, to]
+          if parsedBody.Body.toUpperCase().match("START IVR")
+            dynamoDBClient = new DynamoDBClient()
+            result = await dynamoDBClient.send(
+              new GetItemCommand(
+                TableName: "Configurations"
+                Key:
+                  gatewayName:
+                    "S": to
+              )
+            )
+            configuration = unmarshall(result?.Item)
+            {sid,token} = configuration.authentication
+            data =
+              To: from
+              From: configuration.phoneNumber
+              Url: "https://f9l1259lmb.execute-api.us-east-1.amazonaws.com/gooseberry"
+            url = "https://api.twilio.com/2010-04-01/Accounts/#{sid}/Calls.json"
+
+            await axios.post url, qs.stringify(data), auth:
+              username: sid
+              password: token
+
+            [null,null,null]
+          else
+            [parsedBody.Body,from, to]
       else if event.isBase64Encoded #SMSLeopard
         parsedBody = qs.parse(Buffer.from(event.body,"base64").toString("utf8"))
         console.log "Parsed Body:"
@@ -71,6 +96,12 @@ exports.handler = (event) =>
 
   else 
     [event.queryStringParameters?.message, event.queryStringParameters?.from, event.queryStringParameters?.gateway]
+
+
+  if message is null and  source is null and gateway is null
+    # Use this for initiating IVR or for doing other side effects that don't require a SMS response
+    return
+      statusCode: 204 # 204 means empty response - we don't want to send any more SMS
 
   unless message?
     return
@@ -114,7 +145,9 @@ exports.handler = (event) =>
           "
         else
           "
-          <Play>#{response}</Play>
+          <Gather>
+            <Play>#{response}</Play>
+          </Gather>
           "
         }
       </Response>
