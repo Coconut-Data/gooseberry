@@ -1,8 +1,8 @@
 `const {InteractionTable, Interaction, QuestionSet} = require('./gooseberry')`
 `const {DynamoDBClient,GetItemCommand, CreateTableCommand} = require("@aws-sdk/client-dynamodb")`
 `const {marshall, unmarshall} = require("@aws-sdk/util-dynamodb")`
-axios = require 'axios'
-qs = require 'qs'
+global.axios = require 'axios'
+global.qs = require 'qs'
 
 class Gooseberry
   constructor: (gatewayConfiguration) ->
@@ -52,7 +52,7 @@ exports.handler = (event) =>
           from = parsedBody.From
 
         #Use the Twilio number to get a gateway for each Twilio phone number (SMS and IVR use the same gateway)
-        to = "Twilio-#{to.replace(/\+/,"")}"
+        to = "Twilio-#{to.replace(/\+/,"").replace(/:/,"-")}"
         if parsedBody.CallStatus?
           ivr = true
           message = if parsedBody.Digits?
@@ -86,13 +86,21 @@ exports.handler = (event) =>
             [null,null,null]
           else
             [parsedBody.Body,from, to]
-      else if event.isBase64Encoded #SMSLeopard
+      else if event.isBase64Encoded #SMSLeopard/Africastalking
         parsedBody = qs.parse(Buffer.from(event.body,"base64").toString("utf8"))
         console.log "Parsed Body:"
-        parsedBody = JSON.parse(Object.keys(parsedBody)[0])
-        console.log parsedBody
-        canSendResponses = false
-        [parsedBody.message, "+"+parsedBody.sender, "Tusome"]
+        console.log "Parsed Body: #{JSON.stringify(parsedBody)}"
+        if parsedBody.to is "3061"
+          canSendResponses = false
+          [parsedBody.text, parsedBody.from, "Malawi"]
+        else if parsedBody.short_code is "24971"
+          canSendResponses = false
+          [parsedBody.message, parsedBody.sender, "Tusome"]
+        else # This one shouldn't be required anymore since SMSLeopard fixed their encoding
+          parsedBody = JSON.parse(Object.keys(parsedBody)[0])
+          console.log parsedBody
+          canSendResponses = false
+          [parsedBody.message, "+"+parsedBody.sender, "Tusome"]
 
   else 
     [event.queryStringParameters?.message, event.queryStringParameters?.from, event.queryStringParameters?.gateway]

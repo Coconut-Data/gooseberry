@@ -66,11 +66,18 @@ class Interaction
 
   nextQuestion: =>
     questionIndex = @currentQuestionIndex()
+    currentQuestion = @questionSet.getQuestion(questionIndex)
 
+    #Get the next unskipped question
     loop #basically do...while
       questionIndex += 1
       question = @questionSet.getQuestion(questionIndex)
       break unless question? and await @shouldSkip(question)
+
+    # While it seems like this should be above the loop, we put it here so that we can reset question to null in case the rest of questions need to be skipped
+    if currentQuestion.completeQuestionSetIf
+      if await @eval(currentQuestion.completeQuestionSetIf,@latestMessageContents) is true
+        question = null #This will force it to skip over the questions
 
     textToSend = ""
     if question?
