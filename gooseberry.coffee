@@ -95,8 +95,16 @@ class Interaction
         text: textToSend
     else
       @data.complete = true
+      if @questionSet.data.onValidatedComplete?
+        @resultOfOnValidatedComplete = await @eval(@questionSet.data.onValidatedComplete)
+
       if @questionSet.data.complete_message?
-        textToSend = await @evalForInterpolatedValues(@questionSet.data.complete_message)
+        completeMessage = @questionSet.data.complete_message
+        textToSend = if @resultOfOnValidatedComplete?
+          await @evalForInterpolatedValues(completeMessage, @resultOfOnValidatedComplete)
+        else
+          await @evalForInterpolatedValues(completeMessage)
+
         @data.messagesSent.push
           questionIndex: questionIndex
           text: textToSend
@@ -189,9 +197,8 @@ class Interaction
   ResultOfQuestion = (question) ->
     #{JSON.stringify @resultsByLabel()}?[question]
 
-  #{codeToEval}
+  #{codeToEval.replace(/\n/g,"\n  ")}
     """
-
     await ((Coffeescript.eval(codeToEval, {bare:true}))(value))
 
   save: =>
