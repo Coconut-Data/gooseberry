@@ -5,7 +5,7 @@ Coffeescript = require 'coffeescript'
 `const differenceInMinutes = require('date-fns/differenceInMinutes')`
 
 `const {marshall, unmarshall} = require("@aws-sdk/util-dynamodb")`
-`const Fuse = require('fuse.js')`
+#Fuse = require('fuse.js')
 
 class QuestionSet
   constructor: (@data) ->
@@ -83,12 +83,22 @@ class Interaction
     if question?
       textToSend = if question.calculated_label
         await @evalForInterpolatedValues(question.calculated_label) # Allows for dynamic changes to the question
-      else if question.type is "radio"
-        "#{question.label} [#{question["radio-options"]}]"
-      else if question.type is "audio"
-        question.url
       else
         question.label
+
+      if question.type is "autocomplete from code"
+        options = await @eval(question["autocomplete-options"])
+        if options.length > 120
+          options = "#{options.split(/, */)[0..5].join(",")}..."
+        textToSend = "#{question.label} [#{options}]"
+      else if question.type is "radio"
+        options = question["radio-options"]
+        if options.length > 120
+          options = "#{options.split(/, */)[0..5].join(",")}..."
+        textToSend = "#{question.label} [#{options}]"
+      else if question.type is "audio"
+        textToSend = question.url
+
 
       @data.messagesSent.push
         questionIndex: questionIndex
@@ -144,8 +154,12 @@ class Interaction
       await @eval(question.validation, contents)
 
     # With radio options we convert any incoming messages to the format of the radio option even if it's a different case
-    radioErrorMessage = if question.type is "radio"
-      options = question["radio-options"].split(/, */)
+    optionsErrorMessage = if question.type is "radio" or question.type is "autocomplete from code"
+      options = if question.type is "radio"
+        question["radio-options"].split(/, */)
+      else if question.type is "autocomplete from code"
+        (await @eval(question["autocomplete-options"])).split(/, */)
+
       optionsUpperCaseMappedToOriginal = {}
       options.forEach (option) => 
         upperCaseOption = option.toUpperCase()
@@ -158,15 +172,18 @@ class Interaction
         @latestMessageContents = optionsUpperCaseMappedToOriginal[contents.toUpperCase()] #Update the incoming message text
         null # null means validation passed
       else
+        ###
         # Commented out because errors on AWS about Fuse not being a constructor
-        #updatedWithFuse = if question.type is "radio" and question.disable_fuzzy_search isnt true
-        #  console.log "Loading fuse"
-        #  fuse = new Fuse(question["radio-options"].split(/, */), 
-        #    includeScore:true
-        #    threshold: 0.4
-        #  )
-        #  if fuse.search(contents)?[0]?.item
-        #    @latestMessageContents = fuse.search(contents)?[0]?.item
+        updatedWithFuse = if (question.type is "radio" or question.type is "autocomplete from code") and question.disable_fuzzy_search isnt true
+          console.log "Loading fuse"
+          fuse = new Fuse(options,
+            includeScore:true
+            threshold: 0.4
+          )
+          if fuse.search(contents)?[0]?.item
+            console.log fuse.search(contents)?[0]?.item
+            @latestMessageContents = fuse.search(contents)?[0]?.item
+        ###
         updatedWithFuse = false
 
 
@@ -183,8 +200,8 @@ class Interaction
       else
         null
 
-    if validationErrorMessage isnt null or radioErrorMessage isnt null or numberErrorMessage isnt null
-      "#{validationErrorMessage or ""}#{radioErrorMessage or ""}#{numberErrorMessage or ""}"
+    if validationErrorMessage isnt null or optionsErrorMessage isnt null or numberErrorMessage isnt null
+      "#{validationErrorMessage or ""}#{optionsErrorMessage or ""}#{numberErrorMessage or ""}"
     else
       null
 
@@ -194,6 +211,7 @@ class Interaction
   eval: (codeToEval, value) =>
     codeToEval = """
 (value) ->
+  source = '#{@data.source}' # Use this to identify the user, e.g. phone number
   ResultOfQuestion = (question) ->
     #{JSON.stringify @resultsByLabel()}?[question]
 
