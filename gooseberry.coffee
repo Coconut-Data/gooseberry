@@ -174,6 +174,10 @@ class Interaction
       else
         ###
         # Commented out because errors on AWS about Fuse not being a constructor
+        # 
+        # TODO
+        # Seems like there is a fix now: https://github.com/krisk/Fuse/issues/567#issuecomment-1024147950
+        #
         updatedWithFuse = if (question.type is "radio" or question.type is "autocomplete from code") and question.disable_fuzzy_search isnt true
           console.log "Loading fuse"
           fuse = new Fuse(options,

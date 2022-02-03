@@ -1,0 +1,29 @@
+{
+  "name": "gooseberry-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function based SMS interactor",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.8.0",
+    "@aws-sdk/util-dynamodb": "^3.8.0",
+    "assert": "^2.0.0",
+    "axios": "^0.21.1",
+    "date-fns": "^2.19.0",
+    "fuse.js": "^6.4.6",
+    "qs": "^6.9.6"
+  },
+  "targets": {
+    "default": {
+      "includeNodeModules": true
+    }
+  },
+  "devDependencies": {
+    "coffee-loader": "^2.0.0",
+    "coffeescript": "^2.5.1"
+  }
+}
